@@ -4,48 +4,49 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-# Título e Interfaz
-st.title("🛠️ Escáner de Liners HERS")
-st.write("Coloca una **tarjeta** al lado del liner para medir.")
+st.set_page_config(page_title="Scanner HERS", layout="centered")
+st.title("📏 Medidor de Liners Metálicos")
 
-foto = st.camera_input("Tomar foto")
+foto = st.camera_input("Capturar")
 
 if foto:
+    # Procesar imagen
     img = Image.open(foto)
     img_array = np.array(img.convert('RGB'))
     
-    # Procesamiento de imagen
+    # 1. Filtros para metal (brillo alto)
     gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    blur = cv2.medianBlur(gray, 5)
-    edged = cv2.Canny(blur, 30, 150) # Más sensible a bordes
+    blur = cv2.bilateralFilter(gray, 9, 75, 75) # Limpia ruido sin borrar bordes
+    edged = cv2.Canny(blur, 40, 120) 
     
+    # 2. Encontrar contornos
     cnts, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if len(cnts) >= 2:
-        # Ordenar por área para encontrar los dos objetos más grandes
         cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
         
-        # Objeto 1: Liner | Objeto 2: Tarjeta (Referencia)
-        # 85.6mm es el ancho estándar de una tarjeta
+        # REFERENCIA (Tarjeta = 85.6mm)
         rect_ref = cv2.minAreaRect(cnts[1])
         px_per_mm = max(rect_ref[1]) / 85.6
         
+        # LINER
         rect_liner = cv2.minAreaRect(cnts[0])
         largo = max(rect_liner[1]) / px_per_mm
         ancho = min(rect_liner[1]) / px_per_mm
         
-        st.success(f"📏 Medida: {round(largo, 1)}mm x {round(ancho, 1)}mm")
+        st.metric("Largo Detectado", f"{round(largo, 1)} mm")
+        st.metric("Ancho Detectado", f"{round(ancho, 1)} mm")
         
-        # Buscar en inventario.csv
+        # 3. Cruce con inventario.csv
         try:
             df = pd.read_csv('inventario.csv')
-            # Buscamos coincidencias (tolerancia 8mm)
-            match = df[(df['Largo_Nominal'].between(largo-8, largo+8))]
+            # Tolerancia de 10mm por seguridad
+            match = df[(df['Largo_Nominal'].between(largo-10, largo+10))]
             if not match.empty:
-                st.info(f"✅ Identificado como: **{match.iloc[0]['ID_Material']}**")
+                st.success(f"🆔 Identificado: **{match.iloc[0]['ID_Material']}**")
             else:
-                st.warning("⚠️ No se encontró en el inventario.")
+                st.warning("No hay coincidencias exactas en el inventario.")
         except:
-            st.error("No se pudo leer el archivo inventario.csv")
+            st.error("Error al leer inventario.csv")
     else:
-        st.error("No detecto suficientes objetos. Asegúrate de que el liner y la tarjeta se vean claramente.")
+        st.warning("⚠️ No se detectan dos objetos. Pon la tarjeta al lado del liner.")
