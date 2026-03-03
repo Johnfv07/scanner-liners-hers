@@ -1,52 +1,34 @@
 import streamlit as st
-import cv2
-import numpy as np
 import pandas as pd
-from PIL import Image
 
-st.set_page_config(page_title="Scanner HERS", layout="centered")
-st.title("📏 Medidor de Liners Metálicos")
+st.title("🛠️ Buscador de Materiales HERS")
 
-foto = st.camera_input("Capturar")
+# 1. Instrucción para el usuario
+st.info("💡 Usa la app 'Medición' de tu iPhone para obtener el largo y ancho exacto, luego ingrésalos aquí.")
 
-if foto:
-    # Procesar imagen
-    img = Image.open(foto)
-    img_array = np.array(img.convert('RGB'))
-    
-    # 1. Filtros para metal (brillo alto)
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    blur = cv2.bilateralFilter(gray, 9, 75, 75) # Limpia ruido sin borrar bordes
-    edged = cv2.Canny(blur, 40, 120) 
-    
-    # 2. Encontrar contornos
-    cnts, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if len(cnts) >= 2:
-        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
-        
-        # REFERENCIA (Tarjeta = 85.6mm)
-        rect_ref = cv2.minAreaRect(cnts[1])
-        px_per_mm = max(rect_ref[1]) / 85.6
-        
-        # LINER
-        rect_liner = cv2.minAreaRect(cnts[0])
-        largo = max(rect_liner[1]) / px_per_mm
-        ancho = min(rect_liner[1]) / px_per_mm
-        
-        st.metric("Largo Detectado", f"{round(largo, 1)} mm")
-        st.metric("Ancho Detectado", f"{round(ancho, 1)} mm")
-        
-        # 3. Cruce con inventario.csv
+# 2. Entradas manuales de alta precisión
+col1, col2 = st.columns(2)
+with col1:
+    largo_manual = st.number_input("Largo (mm)", min_value=0.0, step=1.0)
+with col2:
+    ancho_manual = st.number_input("Ancho (mm)", min_value=0.0, step=1.0)
+
+if largo_manual > 0 and ancho_manual > 0:
+    # 3. Botón para identificar
+    if st.button("Identificar Material"):
         try:
             df = pd.read_csv('inventario.csv')
-            # Tolerancia de 10mm por seguridad
-            match = df[(df['Largo_Nominal'].between(largo-10, largo+10))]
+            # Tolerancia pequeña de 3mm porque la regla del iPhone es muy exacta
+            match = df[
+                (df['Largo_Nominal'].between(largo_manual - 3, largo_manual + 3)) &
+                (df['Ancho_Nominal'].between(ancho_manual - 3, ancho_manual + 3))
+            ]
+            
             if not match.empty:
-                st.success(f"🆔 Identificado: **{match.iloc[0]['ID_Material']}**")
+                res = match.iloc[0]
+                st.success(f"✅ Coincidencia: **{res['ID_Material']}**")
+                st.write(f"Forma: {res['Forma']}")
             else:
-                st.warning("No hay coincidencias exactas en el inventario.")
+                st.warning("No se encontró un material con esas medidas exactas.")
         except:
-            st.error("Error al leer inventario.csv")
-    else:
-        st.warning("⚠️ No se detectan dos objetos. Pon la tarjeta al lado del liner.")
+            st.error("Asegúrate de que 'inventario.csv' esté subido en GitHub.")
